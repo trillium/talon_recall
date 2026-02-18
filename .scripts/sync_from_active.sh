@@ -5,7 +5,8 @@
 # Usage: .scripts/sync_from_active.sh   (run from the standalone recall directory)
 #
 # Files synced (active -> standalone):
-#   recall.py, recall.talon, recall_overlay.py,
+#   recall.py, recall_state.py, recall_terminal.py, recall_commands.py,
+#   recall.talon, recall_overlay.py,
 #   recall_combine_mode.talon, recall_overlay_keys.talon,
 #   forbidden_recall_names.talon-list
 #
@@ -22,6 +23,9 @@ STANDALONE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 SYNC_FILES=(
     recall.py
+    recall_state.py
+    recall_terminal.py
+    recall_commands.py
     recall.talon
     recall_overlay.py
     recall_combine_mode.talon
@@ -87,12 +91,22 @@ echo ""
 echo "Checking dependencies..."
 
 # Collect all actions.user.X calls from synced python files
-calls=$(grep -ohP 'actions\.user\.\w+' "$STANDALONE_DIR/recall.py" "$STANDALONE_DIR/recall_overlay.py" 2>/dev/null \
+calls=$(grep -ohP 'actions\.user\.\w+' \
+    "$STANDALONE_DIR/recall.py" \
+    "$STANDALONE_DIR/recall_state.py" \
+    "$STANDALONE_DIR/recall_terminal.py" \
+    "$STANDALONE_DIR/recall_commands.py" \
+    "$STANDALONE_DIR/recall_overlay.py" 2>/dev/null \
     | sed 's/actions\.user\.//' | sort -u)
 
 # Collect all action definitions from recall.py and recall_core.py
 # Matches: "def action_name(" in action_class blocks
-defs=$(grep -ohP 'def \w+\(' "$STANDALONE_DIR/recall.py" "$STANDALONE_DIR/recall_core.py" 2>/dev/null \
+defs=$(grep -ohP 'def \w+\(' \
+    "$STANDALONE_DIR/recall.py" \
+    "$STANDALONE_DIR/recall_state.py" \
+    "$STANDALONE_DIR/recall_terminal.py" \
+    "$STANDALONE_DIR/recall_commands.py" \
+    "$STANDALONE_DIR/recall_core.py" 2>/dev/null \
     | sed 's/def //; s/(//' | sort -u)
 
 missing=0

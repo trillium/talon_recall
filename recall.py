@@ -16,210 +16,28 @@ Features:
 - Restore a terminal: "edgar restore" — launches new terminal at saved path
 """
 
-import json
 import os
-import re
-import subprocess
 import time
 from pathlib import Path
-from talon import Module, Context, actions, app, ui
+from talon import actions, app, ui
 from . import recall_overlay
-
-mod = Module()
-ctx = Context()
-
-# Tags
-mod.tag("recall_pending_input", desc="Waiting for second input in a two-step recall command")
-mod.tag("recall_overlay_visible", desc="A recall overlay is currently showing")
-pending_ctx = Context()
-overlay_ctx = Context()
-
-# State for two-step commands (combine, rename, alias)
-# _pending_mode: "combine" | "rename" | "alias" | ""
-_pending_mode: str = ""
-_pending_name: str = ""
-
-# Storage file path
-STORAGE_FILE = Path(__file__).parent / "saved_windows.json"
-
-# In-memory storage: {name: {id, app, title, path, aliases}}
-saved_windows = {}
-
-# Archive of forgotten windows: {name: {id, app, title, path, aliases, forgotten_at}}
-archived_windows = {}
-
-# Forbidden names are defined in forbidden_recall_names.talon-list
-mod.list("forbidden_recall_names", desc="Words that cannot be used as recall window names")
-
-# Named commands for recall config (defined in recall_commands.talon-list)
-mod.list("recall_commands", desc="Named commands that can be assigned to recall windows")
-
-
-def is_forbidden(name: str) -> bool:
-    """Check if a name is in the forbidden list"""
-    return name.lower() in ctx.lists.get("user.forbidden_recall_names", {}).values()
-
-
-# Known terminal app names for path detection
-TERMINAL_APPS = {
-    "Gnome-terminal", "Mate-terminal", "kitty", "Alacritty",
-    "foot", "xfce4-terminal", "Terminator", "Tilix",
-}
-
-mod.list("saved_window_names", desc="Names of saved windows for recall")
-
-
-@mod.capture(rule="{self.saved_window_names}")
-def saved_window_names(m) -> str:
-    """Returns a single saved window name"""
-    return m.saved_window_names
-
-
-@mod.capture(rule="{self.recall_commands}")
-def recall_command_name(m) -> str:
-    """Returns the spoken name of a recall command (not the resolved shell command)"""
-    # m[0] is the spoken form, m.recall_commands is the resolved value
-    return str(m[0])
-
-
-def load_saved_windows():
-    """Load saved windows from JSON file"""
-    global saved_windows, archived_windows
-    if STORAGE_FILE.exists():
-        try:
-            with open(STORAGE_FILE, "r") as f:
-                data = json.load(f)
-            # Archive lives under "_archive" key, everything else is active
-            archived_windows = data.pop("_archive", {})
-            saved_windows = data
-            update_window_list()
-        except Exception as e:
-            print(f"[recall] Error loading saved windows: {e}")
-            saved_windows = {}
-            archived_windows = {}
-
-
-def save_to_disk():
-    """Persist saved windows and archive to JSON file"""
-    try:
-        data = dict(saved_windows)
-        if archived_windows:
-            data["_archive"] = archived_windows
-        with open(STORAGE_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        print(f"[recall] Error saving to disk: {e}")
-
-
-def update_window_list():
-    """Update the dynamic list of saved window names for voice commands.
-    Uses create_spoken_forms_from_map so aliases resolve to the canonical name."""
-    if saved_windows:
-        # Build map: {spoken_form: canonical_name}
-        # Both the canonical name and all aliases point to the canonical name
-        name_map = {}
-        for name, info in saved_windows.items():
-            name_map[name] = name
-            for alias in info.get("aliases", []):
-                name_map[alias] = name
-        spoken_forms = actions.user.create_spoken_forms_from_map(
-            name_map,
-            generate_subsequences=True,
-        )
-        ctx.lists["self.saved_window_names"] = spoken_forms
-    else:
-        ctx.lists["self.saved_window_names"] = {}
-
-
-def find_window_by_id(window_id: int) -> ui.Window:
-    """Find a window by its ID across all apps"""
-    if window_id is None:
-        return None
-    for a in ui.apps(background=False):
-        for window in a.windows():
-            if window.id == window_id:
-                return window
-    return None
-
-
-def is_terminal(app_name: str) -> bool:
-    """Check if an app name is a known terminal emulator"""
-    return app_name in TERMINAL_APPS
-
-
-def _parse_title_path(title: str) -> str | None:
-    """Extract a working directory from a terminal title like 'user@host: /path'.
-    Returns the path if valid, else None."""
-    try:
-        match = re.search(r"@[^:]*:\s*(.+)$", title)
-        if match:
-            path = os.path.expanduser(match.group(1).strip())
-            if os.path.isdir(path):
-                return path
-    except Exception:
-        pass
-    return None
-
-
-def detect_terminal_path(window: ui.Window) -> str:
-    """Detect the working directory of a terminal window via title parsing.
-    Only trusts the 'user@host: /path' pattern in the terminal title.
-    The /proc fallback is intentionally omitted because gnome-terminal shares
-    a single server PID across all windows, making it impossible to map a
-    specific window to a specific child shell."""
-    return _parse_title_path(window.title)
-
-
-# Map app names to the binary + args needed to launch with a working directory
-_TERMINAL_LAUNCH = {
-    "Gnome-terminal":   ("gnome-terminal", ["--working-directory={path}"]),
-    "Mate-terminal":    ("mate-terminal", ["--working-directory={path}"]),
-    "kitty":            ("kitty", ["--directory", "{path}"]),
-    "Alacritty":        ("alacritty", ["--working-directory", "{path}"]),
-    "foot":             ("foot", ["--working-directory={path}"]),
-    "xfce4-terminal":   ("xfce4-terminal", ["--working-directory={path}"]),
-    "Terminator":       ("terminator", ["--working-directory={path}"]),
-    "Tilix":            ("tilix", ["--working-directory={path}"]),
-}
-
-
-def _launch_terminal(app_name: str, path: str):
-    """Launch a terminal at the given path using the correct binary for the app."""
-    entry = _TERMINAL_LAUNCH.get(app_name)
-    if entry:
-        binary, arg_templates = entry
-        args = [a.format(path=path) for a in arg_templates]
-        ui.launch(path=binary, args=args)
-    else:
-        # Fallback: try launching the app name lowercased with common --working-directory
-        ui.launch(path=app_name.lower(), args=[f"--working-directory={path}"])
-
-
-def rematch_window(info: dict) -> ui.Window:
-    """Try to re-match a saved window by app name and path/title.
-    Returns the matched window or None."""
-    app_name = info.get("app")
-    saved_path = info.get("path")
-    saved_title = info.get("title", "")
-
-    for a in ui.apps(background=False):
-        if a.name != app_name:
-            continue
-        for window in a.windows():
-            if window.rect.width <= 0 or window.rect.height <= 0:
-                continue
-            # Match by path in title
-            if saved_path and saved_path in window.title:
-                return window
-            # Match by title prefix
-            if saved_title and window.title.startswith(saved_title):
-                return window
-    return None
+from . import recall_state
+from .recall_state import (
+    mod, saved_windows, archived_windows,
+    pending_ctx, is_forbidden,
+    save_to_disk, update_window_list, load_saved_windows,
+    _cancel_pending,
+)
+from .recall_terminal import (
+    is_terminal, detect_terminal_path, _parse_title_path, _launch_terminal,
+)
+from .recall_commands import (
+    find_window_by_id, rematch_window, _resolve_command, _run_when_ready,
+)
 
 
 def archive_window(name: str, info: dict):
     """Move a window entry to the archive, preserving its metadata."""
-    global archived_windows
     info = dict(info)  # copy
     info["forgotten_at"] = time.time()
     archived_windows[name] = info
@@ -236,20 +54,10 @@ def cleanup_closed_windows(closed_window: ui.Window):
             break
 
 
-def _cancel_pending():
-    """Cancel any pending two-step command."""
-    global _pending_mode, _pending_name
-    _pending_mode = ""
-    _pending_name = ""
-    pending_ctx.tags = []
-
-
 @mod.action_class
 class Actions:
     def save_window(name: str):
         """Save the currently focused window with the given name"""
-        global saved_windows
-
         if is_forbidden(name):
             recall_overlay.flash(f'"{name}" is a reserved word')
             return
@@ -319,8 +127,6 @@ class Actions:
 
     def forget_window(name: str):
         """Archive a saved window (remove from active, keep in history)"""
-        global saved_windows
-
         if name not in saved_windows:
             return
 
@@ -332,20 +138,16 @@ class Actions:
 
     def forget_all_windows():
         """Archive all saved windows"""
-        global saved_windows
-
         count = len(saved_windows)
         for name, info in saved_windows.items():
             archive_window(name, info)
-        saved_windows = {}
+        saved_windows.clear()
         save_to_disk()
         update_window_list()
         recall_overlay.flash(f"forgot all ({count} windows, archived)")
 
     def recall_revive(name: str):
         """Relaunch an archived window (terminal at saved path) and re-register it"""
-        global saved_windows, archived_windows
-
         if name not in archived_windows:
             recall_overlay.flash(f'"{name}" not in archive')
             return
@@ -418,8 +220,6 @@ class Actions:
 
     def recall_purge(name: str):
         """Permanently delete an archived window"""
-        global archived_windows
-
         if name not in archived_windows:
             recall_overlay.flash(f'"{name}" not in archive')
             return
@@ -461,8 +261,6 @@ class Actions:
 
     def recall_combine(primary: str, secondary: str):
         """Combine two saved windows: secondary becomes an alias of primary"""
-        global saved_windows
-
         if primary not in saved_windows or secondary not in saved_windows:
             return
         if primary == secondary:
@@ -496,13 +294,11 @@ class Actions:
 
     def recall_combine_start(primary: str):
         """Start two-step combine: show prompt and wait for second name"""
-        global _pending_mode, _pending_name
-
         if primary not in saved_windows:
             return
 
-        _pending_mode = "combine"
-        _pending_name = primary
+        recall_state._pending_mode = "combine"
+        recall_state._pending_name = primary
         pending_ctx.tags = ["user.recall_pending_input"]
         recall_overlay.show_prompt(
             f'Combine with "{primary}"',
@@ -511,13 +307,11 @@ class Actions:
 
     def recall_rename_start(name: str):
         """Start two-step rename: show prompt and wait for new name"""
-        global _pending_mode, _pending_name
-
         if name not in saved_windows:
             return
 
-        _pending_mode = "rename"
-        _pending_name = name
+        recall_state._pending_mode = "rename"
+        recall_state._pending_name = name
         pending_ctx.tags = ["user.recall_pending_input"]
         recall_overlay.show_prompt(
             f'Rename "{name}"',
@@ -526,13 +320,11 @@ class Actions:
 
     def recall_alias_start(name: str):
         """Start two-step alias: show prompt and wait for alias"""
-        global _pending_mode, _pending_name
-
-        print(f"[recall] alias_start: name={name!r}, pending_mode={_pending_mode!r}, pending_name={_pending_name!r}")
+        print(f"[recall] alias_start: name={name!r}, pending_mode={recall_state._pending_mode!r}, pending_name={recall_state._pending_name!r}")
 
         # If we're already waiting for alias input, treat this as the alias
-        if _pending_mode == "alias" and _pending_name:
-            print(f"[recall] alias_start: already pending — treating {name!r} as alias for {_pending_name!r}")
+        if recall_state._pending_mode == "alias" and recall_state._pending_name:
+            print(f"[recall] alias_start: already pending — treating {name!r} as alias for {recall_state._pending_name!r}")
             actions.user.recall_pending_finish(name)
             return
 
@@ -540,10 +332,10 @@ class Actions:
             print(f"[recall] alias_start: ABORT — name not found")
             return
 
-        _pending_mode = "alias"
-        _pending_name = name
+        recall_state._pending_mode = "alias"
+        recall_state._pending_name = name
         pending_ctx.tags = ["user.recall_pending_input"]
-        print(f"[recall] alias_start: tag set, pending_mode={_pending_mode!r}, pending_name={_pending_name!r}")
+        print(f"[recall] alias_start: tag set, pending_mode={recall_state._pending_mode!r}, pending_name={recall_state._pending_name!r}")
         recall_overlay.show_prompt(
             f'Add alias for "{name}"',
             "Say the alias...",
@@ -551,8 +343,6 @@ class Actions:
 
     def recall_pending_finish(spoken: str):
         """Complete whichever two-step command is pending"""
-        global _pending_mode, _pending_name
-
         print(f"[recall] pending_finish: raw spoken={spoken!r}, type={type(spoken).__name__}")
 
         # Normalize: <user.raw_prose> gives a Phrase/list, not a str
@@ -562,8 +352,8 @@ class Actions:
 
         print(f"[recall] pending_finish: normalized spoken={spoken!r}")
 
-        mode = _pending_mode
-        name = _pending_name
+        mode = recall_state._pending_mode
+        name = recall_state._pending_name
         print(f"[recall] pending_finish: mode={mode!r}, name={name!r}")
         _cancel_pending()
         recall_overlay.hide_prompt()
@@ -582,8 +372,6 @@ class Actions:
 
     def recall_promote(spoken_name: str):
         """Promote an alias to be the canonical name, demoting the old name to alias"""
-        global saved_windows
-
         if is_forbidden(spoken_name):
             recall_overlay.flash(f'"{spoken_name}" is a reserved word')
             return
@@ -624,8 +412,6 @@ class Actions:
 
     def recall_rename(name: str, new_name: str):
         """Rename a saved window to a completely new name"""
-        global saved_windows
-
         if is_forbidden(new_name):
             recall_overlay.flash(f'"{new_name}" is a reserved word')
             return
@@ -762,48 +548,6 @@ class Actions:
                     print(f"[recall] restore: unknown command '{command_name}'")
         else:
             print("[recall] restore: timed out waiting for new window")
-
-
-def _resolve_command(stored: str) -> str | None:
-    """Resolve a stored command to its shell command from the recall_commands list.
-    The stored value can be either a spoken name (key) or a shell command (value).
-    Tries key lookup first, then reverse lookup by value, then treats it as a
-    literal shell command."""
-    commands = ctx.lists.get("user.recall_commands", {})
-    # Try as spoken name first (key -> value)
-    if stored in commands:
-        return commands[stored]
-    # Try reverse lookup (maybe stored as the old resolved value)
-    for spoken, shell_cmd in commands.items():
-        if shell_cmd == stored:
-            return shell_cmd
-    # Not in the list — treat as a literal shell command
-    return stored
-
-
-def _run_when_ready(window: ui.Window, command: str):
-    """Poll for the terminal to be ready (title changes), then type the command.
-    Polls every 100ms for up to 5 seconds."""
-    initial_title = window.title
-    _attempts = [0]
-
-    def _check():
-        _attempts[0] += 1
-        try:
-            current_title = window.title
-        except Exception:
-            return  # window gone
-
-        if current_title != initial_title or _attempts[0] >= 50:
-            actions.user.switcher_focus_window(window)
-            actions.sleep("50ms")
-            actions.insert(command)
-            actions.key("enter")
-            return
-
-        cron.after("100ms", _check)
-
-    cron.after("100ms", _check)
 
 
 def _on_title_change(window: ui.Window):

@@ -61,14 +61,15 @@ def _draw_rounded_rect(c: SkiaCanvas, rect: Rect, radius: float):
 
 def _get_saved_windows():
     """Import saved_windows lazily to avoid circular imports."""
-    from .recall import saved_windows, find_window_by_id
+    from .recall_state import saved_windows
+    from .recall_commands import find_window_by_id
     return saved_windows, find_window_by_id
 
 
 def _resolve_command_display(stored: str) -> str:
     """Resolve a stored command to its spoken name for display.
     If stored as a shell command, reverse-lookup the spoken name."""
-    from .recall import ctx
+    from .recall_state import ctx
     commands = ctx.lists.get("user.recall_commands", {})
     if stored in commands:
         return stored
@@ -80,7 +81,7 @@ def _resolve_command_display(stored: str) -> str:
 
 def _resolve_command_shell(stored: str) -> str | None:
     """Resolve a stored command to the actual shell command it will run."""
-    from .recall import ctx
+    from .recall_state import ctx
     commands = ctx.lists.get("user.recall_commands", {})
     if stored in commands:
         return commands[stored]
@@ -92,7 +93,7 @@ def _resolve_command_shell(stored: str) -> str | None:
 
 def _update_overlay_tag():
     """Set or clear the overlay_visible tag based on active canvases."""
-    from .recall import overlay_ctx
+    from .recall_state import overlay_ctx
     if canvas or _help_canvas or _prompt_canvas:
         overlay_ctx.tags = ["user.recall_overlay_visible"]
     else:
@@ -572,7 +573,7 @@ def hide_prompt():
         _prompt_canvas.unregister("draw", on_draw_prompt)
         _prompt_canvas.close()
         _prompt_canvas = None
-    from .recall import _cancel_pending
+    from .recall_state import _cancel_pending
     _cancel_pending()
     _update_overlay_tag()
 
