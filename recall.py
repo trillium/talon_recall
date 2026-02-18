@@ -245,12 +245,12 @@ class Actions:
             actions.user.switcher_focus_window(new_window)
             recall_overlay.highlight_window(new_window, name)
 
-            # Run default command once the shell is ready
+            # Run default command
             command_name = revived.get("command")
             if command_name:
                 shell_cmd = _resolve_command(command_name)
                 if shell_cmd:
-                    _run_when_ready(new_window, shell_cmd)
+                    _run_when_ready(new_window, shell_cmd, revived.get("path"))
         else:
             recall_overlay.flash(f'"{name}" timed out waiting for window')
 
@@ -593,12 +593,12 @@ class Actions:
             save_to_disk()
             actions.user.switcher_focus_window(new_window)
 
-            # Run default command once the shell is ready (title changes from initial)
+            # Run default command
             command_name = info.get("command")
             if command_name:
                 shell_cmd = _resolve_command(command_name)
                 if shell_cmd:
-                    _run_when_ready(new_window, shell_cmd)
+                    _run_when_ready(new_window, shell_cmd, info.get("path"))
                 else:
                     print(f"[recall] restore: unknown command '{command_name}'")
         else:

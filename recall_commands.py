@@ -61,26 +61,14 @@ def _resolve_command(stored: str) -> str | None:
     return stored
 
 
-def _run_when_ready(window: ui.Window, command: str):
-    """Poll for the terminal to be ready (title changes), then type the command.
-    Polls every 100ms for up to 5 seconds."""
-    initial_title = window.title
-    _attempts = [0]
-
-    def _check():
-        _attempts[0] += 1
-        try:
-            current_title = window.title
-        except Exception:
-            return  # window gone
-
-        if current_title != initial_title or _attempts[0] >= 50:
-            actions.user.switcher_focus_window(window)
-            actions.sleep("50ms")
-            actions.insert(command)
-            actions.key("enter")
-            return
-
-        cron.after("100ms", _check)
-
-    cron.after("100ms", _check)
+def _run_when_ready(window: ui.Window, command: str, path: str = None):
+    """Type a command into a terminal window.
+    If path is provided, prepends cd to ensure correct directory."""
+    if path:
+        full_cmd = f"cd {path} && {command}"
+    else:
+        full_cmd = command
+    actions.user.switcher_focus_window(window)
+    actions.sleep("50ms")
+    actions.insert(full_cmd)
+    actions.key("enter")
