@@ -10,6 +10,17 @@ Recall lets you save specific windows and switch between them instantly by voice
 "edgar hello world bravely" → switches, types, and presses Enter
 ```
 
+## Table of contents
+
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Getting started](#getting-started)
+- [All commands](#all-commands)
+- [Terminal path tracking](#terminal-path-tracking)
+- [Customization](#customization)
+- [How it works](#how-it-works)
+- [Using with talonhub/community](#using-with-talonhubcommunity)
+
 ### Saving a window highlights it with a border and name label
 
 ![recall assign](images/recall_assign.png)
@@ -251,6 +262,18 @@ The **help panel** shows each saved window with:
 - Terminal path or full execution command (`cd /path && command`)
 - Complete command reference
 
+### Focus and window switching
+
+| Command | What it does |
+|---------|-------------|
+| `"focus <app>"` | Switch to a running application by name |
+| `"focus last"` | Switch to the previously focused application |
+| `"window next"` | Cycle to the next window of the current app |
+| `"window last"` / `"window previous"` | Cycle to the previous window |
+| `"running list"` | Show/hide a list of running applications |
+| `"running close"` | Hide the running applications list |
+| `"launch <app>"` | Launch an application by name |
+
 ### Basic keyboard commands
 
 These are included so you can operate without talonhub/community:
@@ -326,19 +349,6 @@ If you install [talonhub/community](https://github.com/talonhub/community), reca
 - File editing (opens in your configured editor)
 
 The `basic_keys.talon` and `modes.talon` files in this package may conflict with community's versions. If you install community, you can safely delete those two files — community provides its own comprehensive key and mode commands.
-
-## Development
-
-### Syncing from the active Talon installation
-
-If you develop recall as part of a larger Talon config and maintain this standalone package separately, use the sync script:
-
-```bash
-cd /path/to/standalone-recall
-.scripts/sync_from_active.sh
-```
-
-This copies the core files from your active installation and checks that all action dependencies are satisfied by the standalone shims in `recall_core.py`.
 
 ## License
 

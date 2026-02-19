@@ -1,6 +1,9 @@
 # Essential keyboard commands for standalone recall usage
 # These are normally provided by talonhub/community but included
 # here so recall works out of the box for new users.
+# Available in both command and dictation modes.
+mode: command
+mode: dictation
 -
 # Submit / confirm
 slap: key(enter)
@@ -8,6 +11,8 @@ slap: key(enter)
 escape: key(escape)
 # Delete
 junk: key(backspace)
+backspace: key(backspace)
+delete: key(delete)
 # Tab
 tabby: key(tab)
 # Arrow keys

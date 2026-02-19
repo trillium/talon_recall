@@ -17,6 +17,12 @@ help: help
 close: close
 bravely: bravely
 
+# Focus/window commands
+focus: focus
+running: running
+window: window
+snap: snap
+
 # Common Talon commands
 undo: undo
 redo: redo
