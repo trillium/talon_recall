@@ -119,11 +119,12 @@ class Actions:
 
         save_to_disk()
         update_window_list()
-        recall_overlay.highlight_window(window, name)
 
-        # Update persistent highlight if enabled (focus doesn't re-fire for already-focused window)
+        # Update persistent highlight if enabled, otherwise show brief highlight
         if recall_state._persistent_highlight_enabled:
             recall_overlay.show_persistent_highlight(window, name)
+        else:
+            recall_overlay.highlight_window(window, name)
 
     def recall_window(name: str):
         """Focus the saved window with the given name, with re-match fallback"""
@@ -157,7 +158,8 @@ class Actions:
                 save_to_disk()
 
         actions.user.switcher_focus_window(window)
-        recall_overlay.highlight_window(window, name)
+        if not recall_state._persistent_highlight_enabled:
+            recall_overlay.highlight_window(window, name)
 
     def recall_window_and_enter(name: str):
         """Focus the saved window and press enter"""
@@ -243,7 +245,8 @@ class Actions:
             save_to_disk()
             update_window_list()
             actions.user.switcher_focus_window(new_window)
-            recall_overlay.highlight_window(new_window, name)
+            if not recall_state._persistent_highlight_enabled:
+                recall_overlay.highlight_window(new_window, name)
 
             # Run default command
             command_name = revived.get("command")
@@ -294,8 +297,12 @@ class Actions:
         """Show window name labels on each saved window for 5 seconds"""
         recall_overlay.show_overlay()
 
+    def show_recall_status():
+        """Show the status overlay with all saved windows"""
+        recall_overlay.show_status()
+
     def show_recall_help():
-        """Show the full help overlay with all saved windows and commands"""
+        """Show the help overlay with command reference"""
         recall_overlay.show_help()
 
     def hide_recall_overlay():

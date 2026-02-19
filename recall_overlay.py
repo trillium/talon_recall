@@ -25,6 +25,10 @@ FONT_SIZE = 48
 SHOW_DURATION = "5s"
 MISSING_GAP = 10  # vertical gap between stacked missing-window labels
 
+# Status overlay globals
+_status_canvas: Canvas = None
+_status_hide_job = None
+
 # Help overlay globals
 _help_canvas: Canvas = None
 _help_hide_job = None
@@ -94,7 +98,7 @@ def _resolve_command_shell(stored: str) -> str | None:
 def _update_overlay_tag():
     """Set or clear the overlay_visible tag based on active canvases."""
     from .recall_state import overlay_ctx
-    if canvas or _help_canvas or _prompt_canvas:
+    if canvas or _status_canvas or _help_canvas or _prompt_canvas:
         overlay_ctx.tags = ["user.recall_overlay_visible"]
     else:
         overlay_ctx.tags = []
@@ -247,6 +251,7 @@ HELP_COMMANDS = [
     ('"recall rename <name> <new>"', "rename window"),
     ('"recall promote <alias>"', "make alias the primary name"),
     ('"recall list"', "show labels on windows"),
+    ('"recall status"', "window status panel"),
     ('"recall help"', "this screen"),
     ('"recall forget <name>"', "remove"),
     ('"recall forget all"', "clear all"),
@@ -254,7 +259,43 @@ HELP_COMMANDS = [
 ]
 
 
-def on_draw_help(c: SkiaCanvas):
+def _draw_panel_frame(c: SkiaCanvas, rect: Rect):
+    """Draw panel background + border."""
+    c.paint.style = c.paint.Style.FILL
+    c.paint.color = HELP_PANEL_COLOR
+    _draw_rounded_rect(c, rect, HELP_CORNER_RADIUS)
+    c.paint.style = c.paint.Style.STROKE
+    c.paint.stroke_width = 2
+    c.paint.color = HELP_PANEL_BORDER
+    _draw_rounded_rect(c, rect, HELP_CORNER_RADIUS)
+    c.paint.style = c.paint.Style.FILL
+
+
+def _draw_close_hint(c: SkiaCanvas, panel_x: float, panel_y: float, panel_w: float):
+    """Draw the close hint text + X in the top-right of a panel."""
+    close_text = '"recall close" or Esc'
+    c.paint.textsize = HELP_DETAIL_SIZE
+    c.paint.color = HELP_DIM_COLOR
+    close_w = c.paint.measure_text(close_text)[1].width
+    x_size = 14
+    gap = 10
+    total_hint_w = close_w + gap + x_size
+    close_x = panel_x + panel_w - HELP_PANEL_PAD - total_hint_w
+    c.draw_text(close_text, close_x, panel_y + HELP_PANEL_PAD + HELP_DETAIL_SIZE)
+
+    x_x = close_x + close_w + gap
+    x_cy = panel_y + HELP_PANEL_PAD + HELP_DETAIL_SIZE / 2
+    c.paint.style = c.paint.Style.STROKE
+    c.paint.stroke_width = 2
+    c.paint.color = HELP_DIM_COLOR
+    c.draw_line(x_x, x_cy - x_size / 2, x_x + x_size, x_cy + x_size / 2)
+    c.draw_line(x_x, x_cy + x_size / 2, x_x + x_size, x_cy - x_size / 2)
+    c.paint.style = c.paint.Style.FILL
+
+
+# ── Status overlay (saved windows panel) ─────────────────────────────
+
+def on_draw_status(c: SkiaCanvas):
     saved_windows, find_window_by_id = _get_saved_windows()
     screen = ui.main_screen()
     sr = screen.rect
@@ -264,56 +305,40 @@ def on_draw_help(c: SkiaCanvas):
     c.paint.color = HELP_BG_COLOR
     c.draw_rect(Rect(sr.x, sr.y, sr.width, sr.height))
 
-    # Calculate panel dimensions
+    # Centered panel
     panel_w = sr.width * 0.55
-    panel_x = sr.x + (sr.width - panel_w) / 2
-
-    # Pre-calculate total height needed
-    y_cursor = 0  # relative to panel top
-    y_cursor += HELP_PANEL_PAD  # top padding
-    y_cursor += HELP_HEADER_SIZE + 20  # header + gap
 
     # Sort: active windows first, then missing
     window_names = sorted(
         saved_windows.keys(),
         key=lambda n: 0 if find_window_by_id(saved_windows[n]["id"]) else 1,
     )
+
+    # Pre-calculate panel height
+    panel_h = HELP_PANEL_PAD  # top padding
+    panel_h += HELP_HEADER_SIZE + 20  # header + gap
     for name in window_names:
         info = saved_windows[name]
-        y_cursor += HELP_NAME_SIZE + 8  # name line (aliases + app + command)
+        panel_h += HELP_NAME_SIZE + 8
         if info.get("path") or info.get("command"):
-            y_cursor += HELP_DETAIL_SIZE + 4  # execution line
-        y_cursor += HELP_ROW_PAD  # row gap (includes separator)
+            panel_h += HELP_DETAIL_SIZE + 4
+        panel_h += HELP_ROW_PAD
+    panel_h += HELP_PANEL_PAD  # bottom padding
 
-    if window_names:
-        y_cursor += 12  # extra gap before commands section
-
-    # Commands section
-    y_cursor += HELP_SECTION_SIZE + 16  # "Commands" header + gap
-    y_cursor += len(HELP_COMMANDS) * (HELP_CMD_SIZE + 10)
-    y_cursor += HELP_PANEL_PAD  # bottom padding
-
-    panel_h = y_cursor
-    panel_y = sr.y + (sr.height - panel_h) / 2
-
-    # Clamp panel to screen if too tall
+    # Clamp to screen
     if panel_h > sr.height - 40:
         panel_h = sr.height - 40
-        panel_y = sr.y + 20
 
-    # Draw panel background
-    c.paint.color = HELP_PANEL_COLOR
+    panel_x = sr.x + (sr.width - panel_w) / 2
+    panel_y = sr.y + (sr.height - panel_h) / 2
+
+    # Draw panel
     panel_rect = Rect(panel_x, panel_y, panel_w, panel_h)
-    _draw_rounded_rect(c, panel_rect, HELP_CORNER_RADIUS)
+    _draw_panel_frame(c, panel_rect)
 
-    # Draw panel border
-    c.paint.style = c.paint.Style.STROKE
-    c.paint.stroke_width = 2
-    c.paint.color = HELP_PANEL_BORDER
-    _draw_rounded_rect(c, panel_rect, HELP_CORNER_RADIUS)
-    c.paint.style = c.paint.Style.FILL
+    c.save()
+    c.clip_rect(panel_rect)
 
-    # Content area
     cx = panel_x + HELP_PANEL_PAD
     cy = panel_y + HELP_PANEL_PAD
     content_w = panel_w - HELP_PANEL_PAD * 2
@@ -323,26 +348,7 @@ def on_draw_help(c: SkiaCanvas):
     c.paint.color = HELP_TEXT_COLOR
     c.draw_text("Recall Windows", cx, cy + HELP_HEADER_SIZE)
 
-    # Close hint + X — top-right corner (text then X)
-    close_text = '"recall close" or Esc to close'
-    c.paint.textsize = HELP_DETAIL_SIZE
-    c.paint.color = HELP_DIM_COLOR
-    close_w = c.paint.measure_text(close_text)[1].width
-    x_size = 14
-    gap = 10
-    total_w = close_w + gap + x_size
-    close_x = panel_x + panel_w - HELP_PANEL_PAD - total_w
-    c.draw_text(close_text, close_x, panel_y + HELP_PANEL_PAD + HELP_DETAIL_SIZE)
-
-    # X button (right of text)
-    x_x = close_x + close_w + gap
-    x_cy = panel_y + HELP_PANEL_PAD + HELP_DETAIL_SIZE / 2
-    c.paint.style = c.paint.Style.STROKE
-    c.paint.stroke_width = 2
-    c.paint.color = HELP_DIM_COLOR
-    c.draw_line(x_x, x_cy - x_size / 2, x_x + x_size, x_cy + x_size / 2)
-    c.draw_line(x_x, x_cy + x_size / 2, x_x + x_size, x_cy - x_size / 2)
-    c.paint.style = c.paint.Style.FILL
+    _draw_close_hint(c, panel_x, panel_y, panel_w)
 
     cy += HELP_HEADER_SIZE + 20
 
@@ -365,7 +371,6 @@ def on_draw_help(c: SkiaCanvas):
         app_name = info.get("app", "")
         command = info.get("command")
 
-        # Draw name + app in white
         name_part = all_names
         if app_name:
             name_part += f"    {app_name}"
@@ -374,7 +379,6 @@ def on_draw_help(c: SkiaCanvas):
         c.paint.color = HELP_TEXT_COLOR
         c.draw_text(name_part, name_x, cy + HELP_NAME_SIZE)
 
-        # Append command name in accent color after the name line
         if command:
             display_cmd = _resolve_command_display(command)
             name_part_w = c.paint.measure_text(name_part)[1].width
@@ -383,7 +387,7 @@ def on_draw_help(c: SkiaCanvas):
 
         cy += HELP_NAME_SIZE + 8
 
-        # Detail line: full execution command or just path
+        # Detail line
         path = info.get("path")
         if command and path:
             shell_cmd = _resolve_command_shell(command)
@@ -412,14 +416,55 @@ def on_draw_help(c: SkiaCanvas):
         c.draw_line(cx, cy - HELP_ROW_PAD / 2, cx + content_w, cy - HELP_ROW_PAD / 2)
         c.paint.style = c.paint.Style.FILL
 
-    if window_names:
-        cy += 12
+    c.restore()
 
-    # Commands section header
-    c.paint.textsize = HELP_SECTION_SIZE
-    c.paint.color = HELP_ACCENT
-    c.draw_text("Commands", cx, cy + HELP_SECTION_SIZE)
-    cy += HELP_SECTION_SIZE + 16
+
+# ── Help overlay (commands reference panel) ──────────────────────────
+
+def on_draw_help(c: SkiaCanvas):
+    screen = ui.main_screen()
+    sr = screen.rect
+
+    # Full-screen dim background
+    c.paint.style = c.paint.Style.FILL
+    c.paint.color = HELP_BG_COLOR
+    c.draw_rect(Rect(sr.x, sr.y, sr.width, sr.height))
+
+    # Centered panel
+    panel_w = sr.width * 0.50
+
+    # Pre-calculate panel height
+    panel_h = HELP_PANEL_PAD  # top padding
+    panel_h += HELP_SECTION_SIZE + 16  # "Commands" header + gap
+    panel_h += len(HELP_COMMANDS) * (HELP_CMD_SIZE + 10)
+    panel_h += HELP_PANEL_PAD  # bottom padding
+
+    # Clamp to screen
+    if panel_h > sr.height - 40:
+        panel_h = sr.height - 40
+
+    panel_x = sr.x + (sr.width - panel_w) / 2
+    panel_y = sr.y + (sr.height - panel_h) / 2
+
+    # Draw panel
+    panel_rect = Rect(panel_x, panel_y, panel_w, panel_h)
+    _draw_panel_frame(c, panel_rect)
+
+    c.save()
+    c.clip_rect(panel_rect)
+
+    rx = panel_x + HELP_PANEL_PAD
+    ry = panel_y + HELP_PANEL_PAD
+    content_w = panel_w - HELP_PANEL_PAD * 2
+
+    # Header
+    c.paint.textsize = HELP_HEADER_SIZE
+    c.paint.color = HELP_TEXT_COLOR
+    c.draw_text("Commands", rx, ry + HELP_HEADER_SIZE)
+
+    _draw_close_hint(c, panel_x, panel_y, panel_w)
+
+    ry += HELP_HEADER_SIZE + 20
 
     # Build command list, replacing <ender> with actual ender words
     ender_words = sorted(registry.lists.get("user.dictation_ender", [{}])[-1].keys())
@@ -435,19 +480,57 @@ def on_draw_help(c: SkiaCanvas):
     ]
 
     # Command rows
-    cmd_col_w = content_w * 0.5
+    cmd_col_w = content_w * 0.55
     for cmd, desc in commands:
         c.paint.textsize = HELP_CMD_SIZE
         c.paint.color = HELP_TEXT_COLOR
-        c.draw_text(cmd, cx, cy + HELP_CMD_SIZE)
+        c.draw_text(cmd, rx, ry + HELP_CMD_SIZE)
         c.paint.color = HELP_DIM_COLOR
-        c.draw_text(desc, cx + cmd_col_w, cy + HELP_CMD_SIZE)
-        cy += HELP_CMD_SIZE + 10
+        c.draw_text(desc, rx + cmd_col_w, ry + HELP_CMD_SIZE)
+        ry += HELP_CMD_SIZE + 10
+
+    c.restore()
+
+
+def show_status():
+    """Show the status overlay with all saved windows."""
+    global _status_canvas, _status_hide_job
+
+    hide_help()
+
+    if _status_hide_job:
+        cron.cancel(_status_hide_job)
+        _status_hide_job = None
+
+    if _status_canvas:
+        _status_canvas.unregister("draw", on_draw_status)
+        _status_canvas.close()
+        _status_canvas = None
+
+    screen: Screen = ui.main_screen()
+    _status_canvas = Canvas.from_screen(screen)
+    _status_canvas.register("draw", on_draw_status)
+    _update_overlay_tag()
+
+
+def hide_status():
+    """Hide and destroy the status overlay canvas."""
+    global _status_canvas, _status_hide_job
+    if _status_hide_job:
+        cron.cancel(_status_hide_job)
+        _status_hide_job = None
+    if _status_canvas:
+        _status_canvas.unregister("draw", on_draw_status)
+        _status_canvas.close()
+        _status_canvas = None
+    _update_overlay_tag()
 
 
 def show_help():
-    """Show the full help overlay with all saved windows and commands."""
+    """Show the help overlay with command reference."""
     global _help_canvas, _help_hide_job
+
+    hide_status()
 
     if _help_hide_job:
         cron.cancel(_help_hide_job)
@@ -480,6 +563,7 @@ def hide_help():
 def hide_any():
     """Hide whichever overlay is currently active."""
     hide_overlay()
+    hide_status()
     hide_help()
     hide_prompt()
 
@@ -828,29 +912,41 @@ def on_draw_persistent(c: SkiaCanvas):
     c.draw_rect(Rect(r.x, r.y, r.width, r.height))
     c.paint.style = c.paint.Style.FILL
 
-    # Name label pill at top-center
+    # Name label tab — 1/4 from left, above window, rounded top, flat bottom
     if _persistent_name:
+        display_name = _persistent_name.title()
         c.paint.textsize = PERSISTENT_LABEL_SIZE
-        text_rect = c.paint.measure_text(_persistent_name)[1]
+        text_rect = c.paint.measure_text(display_name)[1]
         text_w = text_rect.width
         text_h = text_rect.height
 
         pill_w = text_w + PERSISTENT_LABEL_PAD_X * 2
         pill_h = text_h + PERSISTENT_LABEL_PAD_Y * 2
-        pill_x = r.x + r.width / 2 - pill_w / 2
-        pill_y = r.y - pill_h - 2
+        pill_x = r.x + r.width / 4 - pill_w / 2
+        pill_y = r.y - pill_h  # above the window, bottom flush with top edge
 
-        if pill_y < 0:
-            pill_y = r.y + 4
-
-        # Background
-        c.paint.color = PERSISTENT_COLOR + PERSISTENT_ALPHA
-        pill_rect = Rect(pill_x, pill_y, pill_w, pill_h)
-        _draw_rounded_rect(c, pill_rect, 6)
+        # Background — rounded top, straight bottom
+        c.paint.color = PERSISTENT_COLOR + "ff"
+        rad = 6
+        path = skia.Path()
+        path.move_to(pill_x, pill_y + rad)
+        path.arc_to_with_oval(
+            Rect(pill_x, pill_y, rad * 2, rad * 2),
+            180, 90, False,
+        )
+        path.line_to(pill_x + pill_w - rad, pill_y)
+        path.arc_to_with_oval(
+            Rect(pill_x + pill_w - rad * 2, pill_y, rad * 2, rad * 2),
+            270, 90, False,
+        )
+        path.line_to(pill_x + pill_w, pill_y + pill_h)
+        path.line_to(pill_x, pill_y + pill_h)
+        path.close()
+        c.draw_path(path)
 
         # Text
-        c.paint.color = "ffffff" + PERSISTENT_ALPHA
-        c.draw_text(_persistent_name, pill_x + PERSISTENT_LABEL_PAD_X, pill_y + PERSISTENT_LABEL_PAD_Y + text_h)
+        c.paint.color = "ffffffff"
+        c.draw_text(display_name, pill_x + PERSISTENT_LABEL_PAD_X, pill_y + PERSISTENT_LABEL_PAD_Y + text_h)
 
 
 def _persistent_check_geometry():

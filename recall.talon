@@ -20,6 +20,7 @@
 # Revive archived:   "recall revive boat"
 # Show archive:      "recall archive"
 # Purge from archive:"recall purge boat"
+# Window status:     "recall status"
 # Help screen:       "recall help"
 # Dismiss overlay:   "recall close"
 
@@ -77,7 +78,10 @@ recall archive:
 recall purge <user.word>:
     user.recall_purge(word)
 
-recall (help | show | info):
+recall (status | info):
+    user.show_recall_status()
+
+recall (help | show):
     user.show_recall_help()
 
 recall border:
