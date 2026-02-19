@@ -45,39 +45,9 @@ Talon has a free public version, but the beta provides the Conformer speech mode
 2. **Subscribe to the Talon Beta tier** ($25/month) on [Patreon](https://www.patreon.com/join/lunixbochs) — this gets you beta builds, the Conformer speech model, and priority support. There's also a $5/month VIP tier for Slack access only, and a $100/month Professional tier for those who depend on Talon for work.
 3. **Join the [Talon Slack](https://talonvoice.com/chat)** and message @aegis to link your Patreon — this unlocks beta downloads
 4. **Install the beta** and launch it — you'll see a Talon icon in your system tray
-5. **Download the speech model** — Talon will prompt you on first launch to download the Conformer model, which provides excellent accuracy out of the box. If the prompt doesn't appear, you can install the model manually from the REPL (see [Installing the speech model from the REPL](#installing-the-speech-model-from-the-repl) below).
+5. **Download the speech model** — click the Talon tray icon and select `Speech Recognition → Conformer D`. See the [Talon installation guide](https://talon.wiki/Resource%20Hub/Talon%20Installation/installation_guide/) for detailed instructions.
 
 The [Talon Slack](https://talonvoice.com/chat) community is also an excellent resource for getting help with setup.
-
-### Installing the speech model from the REPL
-
-Hands too busy for menus? Hand this to your AI agent.
-
-If Talon is running but didn't prompt you to download a speech model, you can trigger the download from the REPL. Open it:
-
-```bash
-# macOS / Linux
-~/.talon/bin/repl
-
-# Windows
-%APPDATA%\Talon\bin\repl
-```
-
-Then run these commands:
-
-```python
-from talon.plugins.engines.w2l import install_menu
-
-# List available models
-for m in sorted(install_menu.manifests.values()):
-    print(m.name)
-
-# Download Conformer D (the recommended model)
-target = next(m for m in install_menu.manifests.values() if m.name.startswith("Conformer D") and "D2" not in m.name and "de_DE" not in m.name)
-install_menu.install_manifest(target)
-```
-
-The download (~120MB) runs in the background. Once complete, Talon will load the engine automatically. You can verify it's working by speaking — if Talon recognizes your speech, the model is active.
 
 ### No other packages required
 
