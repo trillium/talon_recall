@@ -1,0 +1,79 @@
+{
+  "edgar": {
+    "id": 79708820,
+    "app": "Gnome-terminal",
+    "title": "\u2802 Microphone Input Issues",
+    "path": null,
+    "aliases": [
+      "egger"
+    ]
+  },
+  "mary": {
+    "id": 79703341,
+    "app": "Gnome-terminal",
+    "title": "trillium@laptop: ~/code/massage",
+    "path": "/home/trillium/.talon",
+    "aliases": []
+  },
+  "boat": {
+    "id": 80856677,
+    "app": "Gnome-terminal",
+    "title": "trillium@laptop: ~/code/row_tracker",
+    "path": "/home/trillium/code/row_tracker",
+    "aliases": [],
+    "command": "yolo"
+  },
+  "awesome": {
+    "id": 79615082,
+    "app": "Gnome-terminal",
+    "title": "\u2733 Website Development Setup",
+    "path": "/home/trillium/code/awesome-talon",
+    "aliases": [
+      "autumn",
+      "atom"
+    ]
+  },
+  "tester": {
+    "id": null,
+    "app": "Gnome-terminal",
+    "title": "\u2733 Claude Code",
+    "path": "/home/trillium/.talon",
+    "aliases": []
+  },
+  "test": {
+    "id": 80136923,
+    "app": "Gnome-terminal",
+    "title": "trillium@laptop: ~/code/parrot",
+    "path": "/home/trillium/code/parrot",
+    "aliases": [],
+    "command": "yolo"
+  },
+  "oscar": {
+    "id": 80913149,
+    "app": "Gnome-terminal",
+    "title": "trillium@laptop: ~/code/overview",
+    "path": "/home/trillium/code/overview",
+    "aliases": []
+  },
+  "_archive": {
+    "tester": {
+      "id": 79772565,
+      "app": "Gnome-terminal",
+      "title": "trillium@laptop: ~/code",
+      "path": "/home/trillium/code",
+      "aliases": [],
+      "forgotten_at": 1771435422.3564725
+    },
+    "test": {
+      "id": 79768982,
+      "app": "Gnome-terminal",
+      "title": "trillium@laptop: ~/code",
+      "path": "/home/trillium/code",
+      "aliases": [],
+      "forgotten_at": 1771436622.9539278
+    }
+  },
+  "_settings": {
+    "persistent_highlight": true
+  }
+}
