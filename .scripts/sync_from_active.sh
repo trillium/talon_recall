@@ -42,9 +42,9 @@
 #   core/app_switcher/app_switcher.py — OBS imports removed
 #   core/windows_and_tabs/window_management.talon — focus/window commands only
 
-ACTIVE_DIR="$HOME/.talon/user/talon_community/plugin/recall"
+ACTIVE_DIR="$HOME/.talon/user/trillium_talon/plugin/recall"
 STANDALONE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-COMMUNITY_DIR="$HOME/.talon/user/talon_community"
+COMMUNITY_DIR="$HOME/.talon/user/trillium_talon"
 
 SYNC_FILES=(
     recall.py
