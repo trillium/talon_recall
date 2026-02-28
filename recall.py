@@ -36,8 +36,33 @@ from .recall_commands import (
 )
 
 
+def _try_auto_assign(window: ui.Window):
+    """If a saved window has auto_assign=True and id=None, and this window's
+    app matches, automatically reassign the saved entry to this window."""
+    try:
+        app_name = window.app.name
+        wid = window.id
+    except Exception:
+        return
+    for name, info in saved_windows.items():
+        if name.startswith("_"):
+            continue
+        if not info.get("auto_assign"):
+            continue
+        if info.get("id") is not None:
+            # Already has a live window — check if it still exists
+            if find_window_by_id(info["id"]) is not None:
+                continue
+        if info.get("app") == app_name:
+            info["id"] = wid
+            info["title"] = window.title
+            save_to_disk()
+            break
+
+
 def _on_focus_change(window: ui.Window):
-    """When focus changes and persistent highlight is enabled, update the border."""
+    """When focus changes, try auto-assign and update persistent highlight."""
+    _try_auto_assign(window)
     if not recall_state._persistent_highlight_enabled:
         return
     try:
@@ -87,13 +112,18 @@ def cleanup_closed_windows(closed_window: ui.Window):
         if info["id"] == closed_window.id:
             info["id"] = None
             save_to_disk()
+            # Clear persistent border if it was tracking this window
+            if recall_state._persistent_highlight_enabled:
+                recall_overlay.clear_persistent_highlight()
             break
 
 
 @mod.action_class
 class Actions:
     def save_window(name: str):
-        """Save the currently focused window with the given name"""
+        """Save the currently focused window with the given name.
+        If this window is already saved under a different name, the new
+        name is automatically added as an alias of the existing entry."""
         if is_forbidden(name):
             recall_overlay.flash(f'"{name}" is a reserved word')
             return
@@ -101,10 +131,29 @@ class Actions:
         window = ui.active_window()
         app_name = window.app.name
 
-        # Detect path for terminals
+        # Check if this window is already saved under a different name
+        existing_name = find_name_for_window_id(window.id)
+        if existing_name and existing_name != name:
+            # Add as alias instead of creating a duplicate
+            aliases = saved_windows[existing_name].get("aliases", [])
+            if name not in aliases:
+                aliases.append(name)
+                saved_windows[existing_name]["aliases"] = aliases
+                save_to_disk()
+                update_window_list()
+                recall_overlay.flash(f'alias: {name} -> {existing_name}')
+            return
+
+        # Detect path for terminals and VS Code
         path = None
         if is_terminal(app_name):
             path = detect_terminal_path(window)
+        elif app_name == "Code":
+            try:
+                from trillium.workspace.workspace import _get_current_workspace_path
+                path = _get_current_workspace_path()
+            except Exception:
+                pass
 
         # Preserve existing aliases if re-saving under the same name
         existing_aliases = saved_windows.get(name, {}).get("aliases", [])
@@ -126,8 +175,18 @@ class Actions:
         else:
             recall_overlay.highlight_window(window, name)
 
+    def recall_detach(name: str):
+        """Detach a saved window from its live window without forgetting it.
+        Clears the window ID but keeps name, app, path, aliases, etc."""
+        if name not in saved_windows:
+            return
+        saved_windows[name]["id"] = None
+        save_to_disk()
+        recall_overlay.flash(f'{name}: detached')
+
     def recall_window(name: str):
         """Focus the saved window with the given name, with re-match fallback"""
+        recall_overlay.hide_any()
         if name not in saved_windows:
             return
 
@@ -280,6 +339,12 @@ class Actions:
         actions.user.recall_window(name)
         actions.sleep("50ms")
         actions.key(str(number))
+
+    def recall_window_and_mimic(name: str, text: str):
+        """Focus a saved window, wait for context update, then mimic remaining words"""
+        actions.user.recall_window(name)
+        actions.sleep("25ms")
+        actions.mimic(text)
 
     def dictate_to_window(name: str, text: str):
         """Focus a saved window and type dictated text into it"""
@@ -539,6 +604,17 @@ class Actions:
         commands_file = Path(__file__).parent / "recall_commands.talon-list"
         actions.user.edit_text_file(str(commands_file))
 
+    def recall_auto_assign(name: str):
+        """Toggle auto-assign for a saved window. When enabled, the recall
+        system will automatically re-attach to a matching window on focus."""
+        if name not in saved_windows:
+            return
+        current = saved_windows[name].get("auto_assign", False)
+        saved_windows[name]["auto_assign"] = not current
+        save_to_disk()
+        state = "ON" if not current else "OFF"
+        recall_overlay.flash(f'{name}: auto-assign {state}')
+
     def recall_toggle_border():
         """Toggle the persistent window border on/off"""
         recall_state._persistent_highlight_enabled = not recall_state._persistent_highlight_enabled
@@ -559,29 +635,44 @@ class Actions:
         app_name = info.get("app", "")
         path = info.get("path")
 
-        if not is_terminal(app_name) or not path:
+        if app_name == "Code" and path:
+            import subprocess
+            if not os.path.isdir(path):
+                print(f"[recall] restore: VS Code path no longer exists: {path}")
+                actions.user.recall_window(name)
+                return
+
+            # Collect existing window IDs for VS Code
+            existing_ids = set()
+            for a in ui.apps(background=False):
+                if a.name == app_name:
+                    for w in a.windows():
+                        existing_ids.add(w.id)
+
+            subprocess.Popen(["code", path])
+        elif not is_terminal(app_name) or not path:
             # Non-terminal or no path — just try re-match
             actions.user.recall_window(name)
             return
+        else:
+            if not os.path.isdir(path):
+                print(f"[recall] restore: path no longer exists: {path}")
+                actions.user.recall_window(name)
+                return
 
-        if not os.path.isdir(path):
-            print(f"[recall] restore: path no longer exists: {path}")
-            actions.user.recall_window(name)
-            return
+            # Collect existing window IDs for this app
+            existing_ids = set()
+            for a in ui.apps(background=False):
+                if a.name == app_name:
+                    for w in a.windows():
+                        existing_ids.add(w.id)
 
-        # Collect existing window IDs for this app
-        existing_ids = set()
-        for a in ui.apps(background=False):
-            if a.name == app_name:
-                for w in a.windows():
-                    existing_ids.add(w.id)
+            # Launch new terminal at the saved path
+            _launch_terminal(app_name, path)
 
-        # Launch new terminal at the saved path
-        _launch_terminal(app_name, path)
-
-        # Poll for the new window (~2s)
+        # Poll for the new window (~4s)
         new_window = None
-        for _ in range(20):
+        for _ in range(40):
             time.sleep(0.1)
             for a in ui.apps(background=False):
                 if a.name == app_name:
