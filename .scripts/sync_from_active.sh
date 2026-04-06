@@ -2,7 +2,9 @@
 # sync_from_active.sh — Copy core recall files from the active Talon installation
 # to this standalone project. Run from the standalone recall directory.
 #
-# Usage: .scripts/sync_from_active.sh   (run from the standalone recall directory)
+# Usage: .scripts/sync_from_active.sh [--dry-run]   (run from the standalone recall directory)
+#
+# --dry-run  Show what would be synced without copying any files.
 #
 # Files synced (active -> standalone):
 #   recall.py, recall_state.py, recall_terminal.py, recall_commands.py,
@@ -25,6 +27,7 @@
 #   core/contacts/contacts.py
 #   core/app_switcher/app_name_overrides.{linux,mac,windows}.csv
 #   core/windows_and_tabs/windows_and_tabs.py
+#   utils/overlay_kit.py, utils/overlay_dismiss.talon (from trillium/utils/)
 #
 # Files NOT synced (standalone-only):
 #   recall_core.py, basic_keys.talon, dictation_bravely.talon,
@@ -41,6 +44,14 @@
 #   recall_commands.talon-list — personal commands stripped
 #   core/app_switcher/app_switcher.py — OBS imports removed
 #   core/windows_and_tabs/window_management.talon — focus/window commands only
+
+DRY_RUN=0
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY_RUN=1 ;;
+        *) echo "Unknown argument: $arg"; exit 1 ;;
+    esac
+done
 
 ACTIVE_DIR="$HOME/.talon/user/trillium_talon/plugin/recall"
 STANDALONE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -63,7 +74,23 @@ if [ ! -d "$ACTIVE_DIR" ]; then
     exit 1
 fi
 
+[ "$DRY_RUN" -eq 1 ] && echo "(dry run — no files will be written)"
+echo ""
+
 changed=0
+
+# ── Post-copy import rewrites ─────────────────────────────────────────
+# Some recall plugin files use deep relative imports that don't resolve
+# in the standalone's flatter package structure. List rewrites as
+# "filename:old_import:new_import" — applied after each cp in the recall
+# plugin loop below.
+#
+# recall_overlay.py: ...trillium.utils.overlay_kit  →  .utils.overlay_kit
+#   (active lives 3 levels deep; standalone is at root)
+
+POST_COPY_REWRITES=(
+    "recall_overlay.py:from ...trillium.utils.overlay_kit import:from .utils.overlay_kit import"
+)
 
 echo "── Recall plugin files ──────────────────────────────────────────"
 for file in "${SYNC_FILES[@]}"; do
@@ -75,10 +102,27 @@ for file in "${SYNC_FILES[@]}"; do
         continue
     fi
 
-    if [ -f "$dst" ] && diff -q "$src" "$dst" > /dev/null 2>&1; then
+    # Apply any post-copy rewrites to a temp file for diffing purposes
+    tmp=$(mktemp)
+    cp -f "$src" "$tmp"
+    for rewrite in "${POST_COPY_REWRITES[@]}"; do
+        rw_file="${rewrite%%:*}"
+        rw_rest="${rewrite#*:}"
+        rw_old="${rw_rest%%:*}"
+        rw_new="${rw_rest##*:}"
+        if [ "$file" = "$rw_file" ]; then
+            sed -i'' -e "s|${rw_old}|${rw_new}|g" "$tmp"
+        fi
+    done
+
+    if [ -f "$dst" ] && diff -q "$tmp" "$dst" > /dev/null 2>&1; then
         echo "  OK    $file (identical)"
+        rm -f "$tmp"
     else
-        cp "$src" "$dst"
+        if [ "$DRY_RUN" -eq 0 ]; then
+            cp -f "$tmp" "$dst"
+        fi
+        rm -f "$tmp"
         echo "  SYNC  $file"
         changed=$((changed + 1))
     fi
@@ -148,6 +192,9 @@ COMMUNITY_SYNC=(
     # Trillium custom commands (flattened into standalone root)
     "trillium/clear_text_commands.py:clear_text_commands.py"
     "trillium/clear_text_commands.talon:clear_text_commands.talon"
+    # Trillium shared overlay utilities
+    "trillium/utils/overlay_kit.py:utils/overlay_kit.py"
+    "trillium/utils/overlay_dismiss.talon:utils/overlay_dismiss.talon"
 )
 
 for entry in "${COMMUNITY_SYNC[@]}"; do
@@ -161,13 +208,13 @@ for entry in "${COMMUNITY_SYNC[@]}"; do
         continue
     fi
 
-    # Ensure destination directory exists
-    mkdir -p "$(dirname "$dst")"
-
     if [ -f "$dst" ] && diff -q "$src" "$dst" > /dev/null 2>&1; then
         echo "  OK    $dst_rel"
     else
-        cp "$src" "$dst"
+        if [ "$DRY_RUN" -eq 0 ]; then
+            mkdir -p "$(dirname "$dst")"
+            cp -f "$src" "$dst"
+        fi
         echo "  SYNC  $dst_rel"
         changed=$((changed + 1))
     fi
@@ -198,12 +245,13 @@ for entry in "${SANITIZED_FILES[@]}"; do
         continue
     fi
 
-    mkdir -p "$(dirname "$dst")"
-
     if [ -f "$dst" ] && diff -q "$src" "$dst" > /dev/null 2>&1; then
         echo "  OK    $dst_rel (sanitized, identical)"
     else
-        cp "$src" "$dst"
+        if [ "$DRY_RUN" -eq 0 ]; then
+            mkdir -p "$(dirname "$dst")"
+            cp -f "$src" "$dst"
+        fi
         echo "  SYNC  $dst_rel (sanitized)"
         changed=$((changed + 1))
     fi
@@ -214,6 +262,8 @@ done
 echo ""
 if [ "$changed" -eq 0 ]; then
     echo "Already in sync."
+elif [ "$DRY_RUN" -eq 1 ]; then
+    echo "Would sync $changed file(s). (dry run — nothing written)"
 else
     echo "Synced $changed file(s)."
 fi
