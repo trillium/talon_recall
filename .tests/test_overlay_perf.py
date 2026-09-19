@@ -202,6 +202,7 @@ class FakeUI:
         self._apps = []
         self._active = None
         self._screen = FakeScreen()
+        self._callbacks = {}
 
     def set_apps(self, apps):
         self._apps = apps
@@ -220,7 +221,11 @@ class FakeUI:
         return self._screen
 
     def register(self, event, cb):
-        pass
+        self._callbacks.setdefault(event, []).append(cb)
+
+    def fire(self, event, *args):
+        for cb in list(self._callbacks.get(event, [])):
+            cb(*args)
 
 
 class _UserActions:
@@ -380,6 +385,7 @@ def env():
     rs = mods["recall_state"]
     rs.saved_windows.clear()
     rs.archived_windows.clear()
+    mods["recall_commands"]._invalidate_window_id_cache()
 
     # Window fixtures: 2 apps x 3 windows.
     #   alpha   -> live window id 101
@@ -429,6 +435,7 @@ def env():
     yield types.SimpleNamespace(
         counters=counters, ui=ui, cron=cron, mods=mods,
         windows={"w101": w101, "w102": w102},
+        apps=list(ui._apps),
     )
 
 
@@ -521,15 +528,84 @@ def test_status_lists_present_before_missing(env):
     assert dot_colors == ["44cc44", "44cc44", "cc4444", "cc4444"]
 
 
-# ── 2. Scan bound: exactly ONE OS-window scan per draw pass ──────────
+class ClosingWindow(FakeWindow):
+    """A window whose proxy raises AttributeError on .rect (closed mid-draw)."""
 
-def test_draw_persistent_single_scan(env):
+    def __init__(self, wid):
+        self.id = wid
+        self.title = "closing"
+        self.app = None
+        self.focused = False
+
+    @property
+    def rect(self):
+        raise AttributeError("window closed mid-draw")
+
+
+def test_closing_window_skipped_not_fatal(env):
+    draw = env.mods["recall_overlay_draw"]
+    labels = env.mods["recall_overlay_labels"]
+    rs = env.mods["recall_state"]
+    closing = ClosingWindow(104)
+    closing.app = env.apps[0]
+    env.apps[0]._windows.append(closing)
+    rs.saved_windows["dying"] = {"id": 104, "app": "WezTerm",
+                                    "title": "closing", "path": None,
+                                    "aliases": []}
+    env.mods["recall_commands"]._invalidate_window_id_cache()
+    _reset_counters(env)
+    # Map build reads .id only, so the closing window resolves ...
+    hit_rects = draw.draw_persistent(FakeSkiaCanvas(), active_window_id=101)
+    # ... but its unreadable rect skips just that pill, like a miss.
+    assert [n for n, _ in hit_rects] == ["alpha"]
+    # Labels must degrade the same way, not abort the whole overlay.
+    c = FakeSkiaCanvas()
+    labels.on_draw(c)
+    texts = [t for t, _, _, _ in c.texts]
+    assert "alpha" in texts
+    assert "dying (not found)" not in texts  # skipped, never a missing pill
+    assert len([t for t in texts if t == "dying"]) == 0
+
+
+# ── 2. Scan bound: ONE scan when cold, ZERO while cached ─────────────
+# The window map persists across draw passes and is invalidated only by
+# win_open / win_close, so sustained redraws cost no OS scans at all.
+
+def test_draw_persistent_cached_across_passes(env):
     draw = env.mods["recall_overlay_draw"]
     _snapshot(env)
     draw.draw_persistent(FakeSkiaCanvas(), active_window_id=101)
     # 4 saved entries (hits + misses) but a single scan of the 2 apps.
     assert env.counters["apps_calls"] == 1
     assert env.counters["windows_calls"] == 2
+    # Second pass with no window churn: served from cache, zero scans.
+    _reset_counters(env)
+    draw.draw_persistent(FakeSkiaCanvas(), active_window_id=101)
+    assert env.counters["apps_calls"] == 0
+    assert env.counters["windows_calls"] == 0
+
+
+def test_cache_invalidated_on_window_events(env):
+    draw = env.mods["recall_overlay_draw"]
+    cmds = env.mods["recall_commands"]
+    _snapshot(env)
+    draw.draw_persistent(FakeSkiaCanvas(), active_window_id=101)
+    _reset_counters(env)
+    draw.draw_persistent(FakeSkiaCanvas(), active_window_id=101)
+    assert env.counters["apps_calls"] == 0
+    # A window opens: next pass rescans exactly once ...
+    env.ui.fire("win_open", object())
+    draw.draw_persistent(FakeSkiaCanvas(), active_window_id=101)
+    assert env.counters["apps_calls"] == 1
+    assert env.counters["windows_calls"] == 2
+    # ... and caches again until a window closes.
+    _reset_counters(env)
+    draw.draw_persistent(FakeSkiaCanvas(), active_window_id=101)
+    assert env.counters["apps_calls"] == 0
+    env.ui.fire("win_close", object())
+    draw.draw_persistent(FakeSkiaCanvas(), active_window_id=101)
+    assert env.counters["apps_calls"] == 1
+    assert cmds.get_windows_by_id() is not None
 
 
 def test_labels_single_scan(env):
@@ -538,6 +614,9 @@ def test_labels_single_scan(env):
     labels.on_draw(FakeSkiaCanvas())
     assert env.counters["apps_calls"] == 1
     assert env.counters["windows_calls"] == 2
+    _reset_counters(env)
+    labels.on_draw(FakeSkiaCanvas())
+    assert env.counters["apps_calls"] == 0
 
 
 def test_status_single_scan(env):
@@ -548,6 +627,9 @@ def test_status_single_scan(env):
     # now the sort and all rows share one map.
     assert env.counters["apps_calls"] == 1
     assert env.counters["windows_calls"] == 2
+    _reset_counters(env)
+    status.on_draw_status(FakeSkiaCanvas())
+    assert env.counters["apps_calls"] == 0
 
 
 def test_find_window_by_id_unchanged(env):

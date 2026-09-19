@@ -22,10 +22,31 @@ def find_window_by_id(window_id: int) -> ui.Window:
     return None
 
 
-def get_windows_by_id() -> dict:
-    """Snapshot all live windows into an {id: window} map with ONE scan.
+# id -> window snapshot for draw passes, invalidated on window open/close.
+# Window ids are stable for a window's lifetime and .rect reads stay live,
+# so an event-invalidated map is exact with no polling and no TTL staleness.
+# Single-lookup paths (focus/recall/rematch actions) deliberately keep using
+# live find_window_by_id() below.
+_window_id_cache: dict | None = None
 
-    Draw passes resolve every saved entry against this single map instead of
+
+def _invalidate_window_id_cache(*args):
+    """Drop the cached window map (win_open / win_close event)."""
+    global _window_id_cache
+    _window_id_cache = None
+
+
+try:
+    ui.register("win_open", _invalidate_window_id_cache)
+    ui.register("win_close", _invalidate_window_id_cache)
+except Exception:
+    pass  # non-Talon runtimes (tests): cache still works, callers invalidate
+
+
+def get_windows_by_id() -> dict:
+    """Return the cached {id: window} map, scanning ONCE when cold.
+
+    Draw passes resolve every saved entry against this map instead of
     calling find_window_by_id() per entry. Each find_window_by_id() call does
     a full linear scan over all OS windows via the mac accessibility API, so
     a draw over N saved windows cost N full scans — O(saved x total) IPC
@@ -33,11 +54,14 @@ def get_windows_by_id() -> dict:
     every canvas/mode-indicator command behind the clogged callback.
 
     First window wins on duplicate ids, matching find_window_by_id()."""
-    by_id = {}
-    for a in ui.apps(background=False):
-        for window in a.windows():
-            by_id.setdefault(window.id, window)
-    return by_id
+    global _window_id_cache
+    if _window_id_cache is None:
+        by_id = {}
+        for a in ui.apps(background=False):
+            for window in a.windows():
+                by_id.setdefault(window.id, window)
+        _window_id_cache = by_id
+    return _window_id_cache
 
 
 def rematch_window(info: dict) -> ui.Window:
@@ -51,7 +75,10 @@ def rematch_window(info: dict) -> ui.Window:
         if a.name != app_name:
             continue
         for window in a.windows():
-            if window.rect.width <= 0 or window.rect.height <= 0:
+            try:
+                if window.rect.width <= 0 or window.rect.height <= 0:
+                    continue
+            except AttributeError:
                 continue
             # Match by path in title
             if saved_path and saved_path in window.title:

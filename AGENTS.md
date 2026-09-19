@@ -20,8 +20,9 @@ loader skips them; keep it that way. See `pyproject.toml`.
 ## Perf sharp edge
 
 `ui.apps()` / `a.windows()` cross into the mac accessibility API per call.
-Never call them per saved window inside a draw pass — snapshot once with
-`recall_commands.get_windows_by_id()` and resolve against the map.
+Never call them per saved window inside a draw pass — resolve against
+`recall_commands.get_windows_by_id()`, which caches the map across draws
+and invalidates on win_open/win_close (ids are stable, rect reads stay live).
 (Talon Rect has no value `__eq__`; compare `(x, y, w, h)` tuples.)
 
 ## Maintaining this file

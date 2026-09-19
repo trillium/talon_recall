@@ -56,7 +56,10 @@ def on_draw(c: SkiaCanvas):
         pill_h = text_h + PAD_Y * 2
 
         if window is not None:
-            rect = window.rect
+            try:
+                rect = window.rect
+            except AttributeError:
+                continue
             if rect.width <= 0 or rect.height <= 0:
                 continue
 
