@@ -7,6 +7,7 @@ from talon.canvas import Canvas
 from talon.screen import Screen
 from talon.skia.canvas import Canvas as SkiaCanvas
 from talon.ui import Rect
+from .recall_commands import get_windows_by_id
 from .recall_overlay_shared import (
     PILL_CORNER_RADIUS,
     _draw_rounded_rect,
@@ -26,8 +27,13 @@ _hide_job = None
 
 
 def on_draw(c: SkiaCanvas):
-    saved_windows, find_window_by_id = _get_saved_windows()
+    saved_windows, _ = _get_saved_windows()
     screen = ui.main_screen()
+    screen_rect = screen.rect
+
+    # ONE OS-window scan per draw pass (see draw_persistent): misses resolve
+    # to None and render as "(not found)" exactly as before.
+    windows_by_id = get_windows_by_id()
 
     try:
         active_id = ui.active_window().id
@@ -39,7 +45,7 @@ def on_draw(c: SkiaCanvas):
     # First pass: compute pill positions
     pills = []  # [(name, pill_rect, text_x, text_y, bg_color, text_color)]
     for name, info in saved_windows.items():
-        window = find_window_by_id(info["id"])
+        window = windows_by_id.get(info["id"])
 
         c.paint.textsize = FONT_SIZE
         text_rect = c.paint.measure_text(name)[1]
@@ -75,7 +81,7 @@ def on_draw(c: SkiaCanvas):
             pill_w = text_w + PAD_X * 2
             pill_h = text_h + PAD_Y * 2
 
-            center_x = screen.rect.x + screen.rect.width / 2
+            center_x = screen_rect.x + screen_rect.width / 2
             pill_x = center_x - pill_w / 2
             pill_y = missing_y_offset
             text_x = center_x - text_w / 2

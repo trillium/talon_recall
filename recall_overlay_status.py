@@ -7,6 +7,7 @@ from talon.canvas import Canvas
 from talon.screen import Screen
 from talon.skia.canvas import Canvas as SkiaCanvas
 from talon.ui import Rect
+from .recall_commands import get_windows_by_id
 from .recall_overlay_shared import (
     HELP_BG_COLOR,
     HELP_HEADER_SIZE,
@@ -33,9 +34,13 @@ _status_hide_job = None
 
 
 def on_draw_status(c: SkiaCanvas):
-    saved_windows, find_window_by_id = _get_saved_windows()
+    saved_windows, _ = _get_saved_windows()
     screen = ui.main_screen()
     sr = screen.rect
+
+    # ONE OS-window scan per draw pass (see draw_persistent): the sort key
+    # and every row resolve against this map instead of scanning per entry.
+    windows_by_id = get_windows_by_id()
 
     # Full-screen dim background
     c.paint.style = c.paint.Style.FILL
@@ -48,7 +53,7 @@ def on_draw_status(c: SkiaCanvas):
     # Sort: alphabetically by name, active windows first within that
     window_names = sorted(
         saved_windows.keys(),
-        key=lambda n: (0 if find_window_by_id(saved_windows[n]["id"]) else 1, n.lower()),
+        key=lambda n: (0 if windows_by_id.get(saved_windows[n]["id"]) is not None else 1, n.lower()),
     )
 
     # Pre-calculate panel height
@@ -92,7 +97,7 @@ def on_draw_status(c: SkiaCanvas):
     # Window rows
     for name in window_names:
         info = saved_windows[name]
-        window = find_window_by_id(info["id"])
+        window = windows_by_id.get(info["id"])
 
         # Status dot
         dot_radius = 5

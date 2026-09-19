@@ -8,6 +8,7 @@ from talon import skia, ui
 from talon.skia.canvas import Canvas as SkiaCanvas
 from talon.ui import Rect
 
+from .recall_commands import get_windows_by_id
 from .recall_overlay_shared import _get_saved_windows, _pills_overlap
 
 PERSISTENT_COLOR_ACTIVE = "6a6aff"
@@ -152,13 +153,23 @@ def draw_persistent(c: SkiaCanvas, active_window_id, session_states: dict | None
     Returns:
         List of (name, pill_rect) tuples for mouse hit-testing.
     """
-    saved_windows, find_window_by_id = _get_saved_windows()
+    saved_windows, _ = _get_saved_windows()
     if not saved_windows:
         return []
 
+    # ONE OS-window scan per draw pass: resolve every saved entry against
+    # this map. Misses (id None, or window gone) resolve to None and are
+    # skipped exactly as before; archived entries live in a separate dict
+    # and are never drawn, unchanged.
+    windows_by_id = get_windows_by_id()
+
+    screen = ui.main_screen()
+    pill_base_y = screen.visible_rect.y
+    screen_w = screen.rect.width
+
     entries, placed = [], []
     for name, info in list(saved_windows.items()):
-        window = find_window_by_id(info["id"])
+        window = windows_by_id.get(info["id"])
         if window is None:
             continue
         try:
@@ -177,9 +188,8 @@ def draw_persistent(c: SkiaCanvas, active_window_id, session_states: dict | None
         base_x = r.x + r.width / 4 - pill_w / 2
         # Pin all pills to the top of the visible area (just above menu bar bottom),
         # matching the natural position of full-screen window pills.
-        pill_y = ui.main_screen().visible_rect.y - pill_h
+        pill_y = pill_base_y - pill_h
         pill_rect = Rect(base_x, pill_y, pill_w, pill_h)
-        screen_w = ui.main_screen().rect.width
 
         pill_rect = _resolve_collisions(
             pill_rect, pill_w, pill_h, pill_y, placed, screen_w, base_x)

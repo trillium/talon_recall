@@ -187,13 +187,16 @@ def _do_redraw():
 
 def _schedule_redraw():
     """Schedule a redraw after a short delay to let the window manager settle."""
-    global _redraw_job, _previous_pill_rects
+    global _redraw_job, _previous_pill_rects, _last_scheduled_rect
     if _redraw_job:
         cron.cancel(_redraw_job)
     # Invalidate the rebuild cache so the next on_draw_persistent always
     # rebuilds click canvases — callers use _schedule_redraw() precisely
     # because pill positions may have changed.
     _previous_pill_rects = None
+    # Snapshot the tracked geometry so show_persistent_highlight() can tell
+    # "nothing moved" from "window moved" on the next focus event.
+    _last_scheduled_rect = _rect_tuple(_persistent_window) if _persistent_window else None
     _redraw_job = cron.after("50ms", _do_redraw)
 
 
@@ -202,9 +205,44 @@ def refresh_click_canvases():
     _schedule_redraw()
 
 
+# Geometry last scheduled for drawing: (x, y, w, h) of the tracked window,
+# or None when nothing is tracked. Lets show_persistent_highlight() skip
+# redraws when the window hasn't moved. A snapshot is required because the
+# tracked object is a live proxy (two rect reads always agree with each
+# other) and Talon Rect has no value __eq__.
+_last_scheduled_rect = None
+
+
+def _rect_tuple(window):
+    try:
+        r = window.rect
+    except Exception:
+        return None
+    try:
+        return (r.x, r.y, r.width, r.height)
+    except Exception:
+        return None
+
+
 def show_persistent_highlight(window, name: str):
     """Update the persistent highlight to track the given window."""
     global _persistent_canvas, _persistent_window, _persistent_name
+    # Skip the redraw when nothing moved: same tracked window id + name and
+    # geometry unchanged since the last scheduled draw means the next draw
+    # would repaint identical pills (the active highlight is derived from the
+    # tracked id, also unchanged). One cheap rect read, no OS window scan;
+    # any failure falls through to the normal path. Spurious refocus events
+    # for the already-active window — the common case — therefore cost nothing.
+    if (_persistent_canvas is not None and name == _persistent_name
+            and _persistent_window is not None):
+        try:
+            same_id = (_persistent_window.id == window.id)
+        except Exception:
+            same_id = False
+        if same_id:
+            current = _rect_tuple(window)
+            if current is not None and current == _last_scheduled_rect:
+                return
     _persistent_window = window
     _persistent_name = name
     if not _persistent_canvas:
@@ -222,7 +260,8 @@ def show_persistent_highlight(window, name: str):
 
 def hide_persistent_highlight():
     """Destroy the persistent canvas and all click canvases."""
-    global _persistent_canvas, _persistent_window, _persistent_name, _pill_hit_rects, _previous_pill_rects
+    global _persistent_canvas, _persistent_window, _persistent_name, _pill_hit_rects, _previous_pill_rects, _last_scheduled_rect
+    _last_scheduled_rect = None
     _close_click_canvases()
     if _persistent_canvas:
         _persistent_canvas.unregister("draw", on_draw_persistent)
@@ -242,6 +281,8 @@ def hide_persistent_highlight():
 def clear_persistent_highlight():
     """Clear the active window but keep canvas alive."""
     global _persistent_window, _persistent_name
+    if _persistent_window is None and _persistent_name == "":
+        return  # already clear: pills and active highlight are unchanged
     _persistent_window = None
     _persistent_name = ""
     _schedule_redraw()

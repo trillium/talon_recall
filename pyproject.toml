@@ -1,0 +1,7 @@
+# pytest configuration for the standalone recall package.
+#
+# Tests live in .tests/ (dot-prefixed) so Talon's runtime loader skips the
+# directory — otherwise it would import the test files at startup. The tests
+# are self-contained (fake `talon` package in sys.modules) and hermetic.
+[tool.pytest.ini_options]
+testpaths = [".tests"]

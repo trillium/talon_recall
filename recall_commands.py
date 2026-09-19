@@ -22,6 +22,24 @@ def find_window_by_id(window_id: int) -> ui.Window:
     return None
 
 
+def get_windows_by_id() -> dict:
+    """Snapshot all live windows into an {id: window} map with ONE scan.
+
+    Draw passes resolve every saved entry against this single map instead of
+    calling find_window_by_id() per entry. Each find_window_by_id() call does
+    a full linear scan over all OS windows via the mac accessibility API, so
+    a draw over N saved windows cost N full scans — O(saved x total) IPC
+    traffic that overran the 2s canvas watchdog under window load and stalled
+    every canvas/mode-indicator command behind the clogged callback.
+
+    First window wins on duplicate ids, matching find_window_by_id()."""
+    by_id = {}
+    for a in ui.apps(background=False):
+        for window in a.windows():
+            by_id.setdefault(window.id, window)
+    return by_id
+
+
 def rematch_window(info: dict) -> ui.Window:
     """Try to re-match a saved window by app name and path/title.
     Returns the matched window or None."""
