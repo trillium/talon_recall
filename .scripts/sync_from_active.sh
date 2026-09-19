@@ -7,10 +7,19 @@
 # --dry-run  Show what would be synced without copying any files.
 #
 # Files synced (active -> standalone):
-#   recall.py, recall_state.py, recall_terminal.py, recall_commands.py,
-#   recall.talon, recall_overlay.py,
+#   recall.py, recall_state.py, recall_terminal.py, recall_terminal_mac.py,
+#   recall_terminal_linux.py, recall_commands.py,
+#   recall.talon, recall_overlay.py (thin coordinator shim),
+#   recall_overlay_{shared,draw,persistent,labels,status,help,prompt,flash,highlight}.py,
+#   recall_pill_colors.py, recall_save.py, recall_revive.py, recall_alias.py,
+#   recall_meta.py, recall_diag.py, recall_session_state.py,
+#   recall_herdr_agents.py, recall_herdr_panels.py,
+#   herdr_focus.py, herdr_focus.talon, herdr_tab_alias.talon-list,
+#   recall-set-path, saved_windows.example.json,
 #   recall_combine_mode.talon, recall_overlay_keys.talon,
 #   forbidden_recall_names.talon-list
+#
+# NOTE: saved_windows.json (live personal data) is NEVER synced.
 #
 # Community dependencies synced (exact copies preserving directory structure):
 #   core/user_settings.py
@@ -61,9 +70,34 @@ SYNC_FILES=(
     recall.py
     recall_state.py
     recall_terminal.py
+    recall_terminal_mac.py
+    recall_terminal_linux.py
     recall_commands.py
     recall.talon
     recall_overlay.py
+    recall_overlay_shared.py
+    recall_overlay_draw.py
+    recall_overlay_persistent.py
+    recall_overlay_labels.py
+    recall_overlay_status.py
+    recall_overlay_help.py
+    recall_overlay_prompt.py
+    recall_overlay_flash.py
+    recall_overlay_highlight.py
+    recall_pill_colors.py
+    recall_save.py
+    recall_revive.py
+    recall_alias.py
+    recall_meta.py
+    recall_diag.py
+    recall_session_state.py
+    recall_herdr_agents.py
+    recall_herdr_panels.py
+    herdr_focus.py
+    herdr_focus.talon
+    herdr_tab_alias.talon-list
+    recall-set-path
+    saved_windows.example.json
     recall_combine_mode.talon
     recall_overlay_keys.talon
     forbidden_recall_names.talon-list
@@ -276,12 +310,11 @@ echo ""
 echo "Checking dependencies..."
 
 # Collect all actions.user.X calls from recall python files
+# (glob covers the overlay split modules, save/revive/alias/meta, session
+# state, herdr helpers, and any future recall*.py additions)
 calls=$(grep -rohP 'actions\.user\.\w+' \
-    "$STANDALONE_DIR/recall.py" \
-    "$STANDALONE_DIR/recall_state.py" \
-    "$STANDALONE_DIR/recall_terminal.py" \
-    "$STANDALONE_DIR/recall_commands.py" \
-    "$STANDALONE_DIR/recall_overlay.py" 2>/dev/null \
+    "$STANDALONE_DIR"/recall*.py \
+    "$STANDALONE_DIR"/herdr_focus.py 2>/dev/null \
     | sed 's/actions\.user\.//' | sort -u)
 
 # Collect all action definitions from all .py files in the standalone package
