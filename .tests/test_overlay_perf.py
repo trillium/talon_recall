@@ -567,6 +567,37 @@ def test_closing_window_skipped_not_fatal(env):
     assert len([t for t in texts if t == "dying"]) == 0
 
 
+def test_alias_never_shadows_canonical(env):
+    """An alias matching a canonical name must not hijack it.
+
+    Regression test for a guard the refactor dropped: with canonical
+    'bravo' present and 'alpha' carrying alias 'bravo', 'recall bravo'
+    must resolve to bravo, not alpha."""
+    import talon
+    rs = env.mods["recall_state"]
+    seen = {}
+
+    def _recorder(name_map, **kwargs):
+        seen.update(name_map)
+        return {}
+
+    user = talon.actions.user
+    user.create_spoken_forms_from_map = _recorder
+    try:
+        rs.saved_windows.clear()
+        rs.saved_windows.update({
+            "bravo": {"id": 201, "app": "Safari", "title": "b",
+                        "path": None, "aliases": []},
+            "alpha": {"id": 101, "app": "WezTerm", "title": "a",
+                        "path": None, "aliases": ["bravo"]},
+        })
+        rs.update_window_list()
+    finally:
+        del user.create_spoken_forms_from_map
+    assert seen["bravo"] == "bravo"
+    assert seen["alpha"] == "alpha"
+
+
 # ── 2. Scan bound: ONE scan when cold, ZERO while cached ─────────────
 # The window map persists across draw passes and is invalidated only by
 # win_open / win_close, so sustained redraws cost no OS scans at all.
