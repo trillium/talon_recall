@@ -15,7 +15,8 @@ from talon import ui
 TERMINAL_APPS = {
     "Gnome-terminal", "Mate-terminal", "kitty", "Alacritty",
     "foot", "xfce4-terminal", "Terminator", "Tilix",
-    "Terminal", "iTerm2",
+    # AI Added: WezTerm + Ghostty (the captain's Herdr hosts).
+    "Terminal", "iTerm2", "WezTerm", "Ghostty",
 }
 
 
